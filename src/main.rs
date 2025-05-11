@@ -11,6 +11,7 @@ use signal_hook::{
 use simplelog::{Config as LogConfig, WriteLogger};
 
 enum Event {
+    Checking,
     CheckUpdates,
     Shutdown,
 }
@@ -41,7 +42,7 @@ impl Config {
     }
     fn load() -> Result<Self> {
         let config_path = match dirs::config_dir() {
-            Some(dir) => dir.join("hypr").join("app-indicator-rs.toml"),
+            Some(dir) => dir.join("hypr").join("arch-updates-rs.toml"),
             None => {
                 bail!("Failed to get config directory");
             }
@@ -103,7 +104,7 @@ fn main() -> Result<()> {
             bail!("Failed to get XDG_RUNTIME_DIR");
         }
     };
-    let lock_path = format!("{}/app-indicator-rs.lock", runtime_dir);
+    let lock_path = format!("{}/arch-updates-rs.lock", runtime_dir);
     let lock_file = match File::create(&lock_path) {
         Ok(file) => file,
         Err(_) => {
@@ -143,6 +144,8 @@ fn main() -> Result<()> {
         }
     });
 
+    thread::spawn(move || {});
+
     tx.send(Event::CheckUpdates).unwrap();
 
     loop {
@@ -155,6 +158,10 @@ fn main() -> Result<()> {
         };
 
         match event {
+            Event::Checking => {
+                let output = Output::new("checking", "", "", "Checking for updates");
+                send_output(&output)?;
+            }
             Event::CheckUpdates => {
                 let updates: u64 = match check_updates()?.trim().parse() {
                     Ok(updates) => updates,
@@ -247,7 +254,7 @@ fn setup_logging() {
         }
     };
 
-    let log_path = format!("{}/app-indicator-rs.log", runtime_dir);
+    let log_path = format!("{}/arch-updates-rs.log", runtime_dir);
     let log_file = match File::create(log_path) {
         Ok(file) => file,
         Err(_) => {
