@@ -1,6 +1,7 @@
 use std::{fs::File, path::Path, process::Command, sync::mpsc::channel, thread};
 
 use anyhow::{Result, bail};
+use fs2::FileExt;
 use log::{LevelFilter, error, info};
 use serde::{Deserialize, Serialize};
 use signal_hook::{
@@ -95,6 +96,27 @@ impl Output {
 fn main() -> Result<()> {
     setup_logging();
     verify_checkupdates_is_installed()?;
+
+    let runtime_dir = match std::env::var("XDG_RUNTIME_DIR") {
+        Ok(dir) => dir,
+        Err(_) => {
+            bail!("Failed to get XDG_RUNTIME_DIR");
+        }
+    };
+    let lock_path = format!("{}/app-indicator-rs.lock", runtime_dir);
+    let lock_file = match File::create(&lock_path) {
+        Ok(file) => file,
+        Err(_) => {
+            bail!("Failed to create lock file");
+        }
+    };
+
+    if lock_file.try_lock_exclusive().is_err() {
+        error!("Failed to acquire lock. Another instance is running.");
+        bail!("Exiting");
+    }
+
+    info!("Lock acquired");
 
     let config = Config::load()?;
 
