@@ -229,7 +229,7 @@ fn main() -> Result<()> {
 
         match event {
             Event::Checking => {
-                let output = Output::new("checking", "", "", "Checking for updates");
+                let output = Output::new("checking", "...", "...", "Checking for updates");
                 send_output(&output)?;
             }
             Event::CheckUpdates => {
