@@ -245,6 +245,7 @@ fn verify_checkupdates_is_installed() -> Result<()> {
         Err(e) => bail!("Failed to check if checkupdates is installed: {}", e),
     }
 }
+
 fn setup_logging() {
     let runtime_dir = match std::env::var("XDG_RUNTIME_DIR") {
         Ok(dir) => dir,
