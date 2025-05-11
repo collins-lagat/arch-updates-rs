@@ -1,14 +1,27 @@
-use std::{fs::File, path::Path, process::Command, sync::mpsc::channel, thread};
+use std::{
+    fs::File,
+    path::Path,
+    process::Command,
+    sync::mpsc::channel,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Result, bail};
 use fs2::FileExt;
 use log::{LevelFilter, error, info};
+use notify::{
+    self, Event as NotifyEvent, EventKind, Result as NotifyResult, Watcher,
+    event::{CreateKind, ModifyKind},
+};
 use serde::{Deserialize, Serialize};
 use signal_hook::{
     consts::{SIGINT, SIGTERM},
     iterator::Signals,
 };
 use simplelog::{Config as LogConfig, WriteLogger};
+
+const PACMAN_DIR: &str = "/var/lib/pacman/local";
 
 enum Event {
     Checking,
@@ -94,6 +107,27 @@ impl Output {
     }
 }
 
+struct Debouncer {
+    last_trigger_time: Instant,
+    debounce_duration: Duration,
+}
+impl Debouncer {
+    fn new(debounce_duration: Duration) -> Self {
+        Debouncer {
+            last_trigger_time: Instant::now(),
+            debounce_duration,
+        }
+    }
+    fn debounce(&mut self) -> bool {
+        let current_time = Instant::now();
+        if current_time.duration_since(self.last_trigger_time) >= self.debounce_duration {
+            self.last_trigger_time = current_time;
+            return true;
+        }
+        false
+    }
+}
+
 fn main() -> Result<()> {
     setup_logging();
     verify_checkupdates_is_installed()?;
@@ -144,7 +178,41 @@ fn main() -> Result<()> {
         }
     });
 
-    thread::spawn(move || {});
+    let watcher_tx = tx.clone();
+    thread::spawn(move || {
+        let (tx, rx) = channel::<NotifyResult<NotifyEvent>>();
+        let mut watcher = match notify::recommended_watcher(tx) {
+            Ok(watcher) => watcher,
+            Err(e) => {
+                error!("Failed to create watcher: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = watcher.watch(Path::new(PACMAN_DIR), notify::RecursiveMode::NonRecursive) {
+            error!("Failed to watch directory: {}", e);
+            return;
+        }
+
+        let mut debouncer = Debouncer::new(Duration::from_millis(1000));
+
+        for res in rx {
+            match res {
+                Ok(event) => match event.kind {
+                    EventKind::Create(CreateKind::Any) | EventKind::Modify(ModifyKind::Any) => {
+                        info!("event: {:?}", event);
+                        if debouncer.debounce() {
+                            watcher_tx.send(Event::Checking).unwrap();
+                        }
+                    }
+                    _ => {}
+                },
+                Err(e) => {
+                    error!("watch error: {}", e);
+                }
+            };
+        }
+    });
 
     tx.send(Event::CheckUpdates).unwrap();
 
