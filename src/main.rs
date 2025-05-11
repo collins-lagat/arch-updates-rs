@@ -238,6 +238,7 @@ fn main() -> Result<()> {
                         break;
                     }
                 };
+
                 if updates == 0 {
                     let output = Output::new("", "0", "0", "No updates available");
                     send_output(&output)?;
