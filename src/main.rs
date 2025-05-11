@@ -231,6 +231,8 @@ fn main() -> Result<()> {
             Event::Checking => {
                 let output = Output::new("checking", "...", "...", "Checking for updates");
                 send_output(&output)?;
+                thread::sleep(Duration::from_secs(5));
+                tx.send(Event::CheckUpdates).unwrap();
             }
             Event::CheckUpdates => {
                 let updates: u64 = match check_updates()?.trim().parse() {
