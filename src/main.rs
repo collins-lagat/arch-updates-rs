@@ -12,7 +12,7 @@ use fs2::FileExt;
 use log::{LevelFilter, error, info};
 use notify::{
     self, Event as NotifyEvent, EventKind, Result as NotifyResult, Watcher,
-    event::{CreateKind, ModifyKind},
+    event::{AccessKind, AccessMode, CreateKind},
 };
 use serde::{Deserialize, Serialize};
 use signal_hook::{
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
             }
         };
 
-        if let Err(e) = watcher.watch(Path::new(PACMAN_DIR), notify::RecursiveMode::NonRecursive) {
+        if let Err(e) = watcher.watch(Path::new(PACMAN_DIR), notify::RecursiveMode::Recursive) {
             error!("Failed to watch directory: {}", e);
             return;
         }
@@ -199,7 +199,9 @@ fn main() -> Result<()> {
         for res in rx {
             match res {
                 Ok(event) => match event.kind {
-                    EventKind::Create(CreateKind::Any) | EventKind::Modify(ModifyKind::Any) => {
+                    EventKind::Create(CreateKind::File)
+                    | EventKind::Create(CreateKind::Folder)
+                    | EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
                         info!("event: {:?}", event);
                         if debouncer.debounce() {
                             watcher_tx.send(Event::Checking).unwrap();
