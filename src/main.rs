@@ -1,6 +1,6 @@
 use std::{fs::File, path::Path, process::Command, sync::mpsc::channel, thread};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use log::{LevelFilter, error, info};
 use serde::{Deserialize, Serialize};
 use signal_hook::{
@@ -42,7 +42,7 @@ impl Config {
         let config_path = match dirs::config_dir() {
             Some(dir) => dir.join("hypr").join("app-indicator-rs.toml"),
             None => {
-                anyhow::bail!("Failed to get config directory");
+                bail!("Failed to get config directory");
             }
         };
 
@@ -54,7 +54,7 @@ impl Config {
         let config_contents = match std::fs::read_to_string(config_path) {
             Ok(contents) => contents,
             Err(_) => {
-                anyhow::bail!("Failed to read config file");
+                bail!("Failed to read config file");
             }
         };
         let config: Self = toml::from_str(&config_contents)?;
@@ -189,18 +189,18 @@ fn check_updates() -> Result<String> {
     {
         Ok(output) => {
             if !output.status.success() {
-                anyhow::bail!("checkupdates failed");
+                bail!("checkupdates failed");
             };
 
             let stdout = match String::from_utf8(output.stdout) {
                 Ok(stdout) => stdout,
                 Err(e) => {
-                    anyhow::bail!("Failed to parse stdout of checkupdates: {}", e);
+                    bail!("Failed to parse stdout of checkupdates: {}", e);
                 }
             };
             Ok(stdout)
         }
-        Err(e) => anyhow::bail!("Failed to check for updates: {}", e),
+        Err(e) => bail!("Failed to check for updates: {}", e),
     }
 }
 
@@ -208,12 +208,12 @@ fn verify_checkupdates_is_installed() -> Result<()> {
     match Command::new("which").arg("checkupdates").output() {
         Ok(output) => {
             if !output.status.success() {
-                anyhow::bail!("checkupdates is not installed");
+                bail!("checkupdates is not installed");
             };
             info!("checkupdates is installed");
             Ok(())
         }
-        Err(e) => anyhow::bail!("Failed to check if checkupdates is installed: {}", e),
+        Err(e) => bail!("Failed to check if checkupdates is installed: {}", e),
     }
 }
 fn setup_logging() {
