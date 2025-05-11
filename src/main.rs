@@ -275,6 +275,7 @@ fn main() -> Result<()> {
 
 fn send_output(output: &Output) -> Result<()> {
     let output_contents = serde_json::to_string(output)?;
+    info!("{}", output_contents);
     println!("{}", output_contents);
     Ok(())
 }
