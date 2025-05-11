@@ -2,6 +2,8 @@
 
 A simple Rust program that checks for Arch Linux updates using **checkupdates** and displays them in **Waybar**.
 
+Additionally, it detects when **pacman** and changes the mode to checking. It also schedules a check for updates every 5 seconds. This is to prevent waybar from displaying that their are available updates when they are none.
+
 ## Requirements
 
 - **pacman-contrib** - Arch Linux package that provides `checkupdates`. This is strictly required.
@@ -20,3 +22,15 @@ cargo build --release
 ```bash
 mv target/release/arch-updates-rs ~/.local/bin
 ```
+
+## Configuration
+
+You can configure the program by editing the `~/.config/hypr/arch-updates-rs.toml` file. The default configuration is as follows:
+
+```toml
+inverval_in_seconds = 1200
+warning_threshold = 25
+critical_threshold = 100
+```
+
+The `inverval_in_seconds` option sets the interval in seconds between each check for updates.
