@@ -249,6 +249,17 @@ fn main() -> Result<()> {
                     continue;
                 }
 
+                if updates < config.warning_threshold {
+                    let output = Output::new(
+                        "",
+                        &updates.to_string(),
+                        &updates.to_string(),
+                        &format!("You have {} updates available", &updates.to_string()),
+                    );
+                    send_output(&output)?;
+                    continue;
+                }
+
                 if updates > config.warning_threshold && updates <= config.critical_threshold {
                     let output = Output::new(
                         "yellow",
