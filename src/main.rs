@@ -2,12 +2,12 @@ use std::{
     fs::File,
     path::Path,
     process::Command,
-    sync::mpsc::channel,
+    sync::mpsc::{Sender, channel},
     thread,
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use fs2::FileExt;
 use log::{LevelFilter, error, info};
 use notify::{
@@ -22,12 +22,21 @@ use signal_hook::{
 use simplelog::{
     ColorChoice, CombinedLogger, Config as LogConfig, TermLogger, TerminalMode, WriteLogger,
 };
+use tray_icon::Icon;
 
 const PACMAN_DIR: &str = "/var/lib/pacman/local";
 
+const CHECKING_ICON_BYTES: &[u8] = include_bytes!("../assets/checking.png");
+const NO_UPDATES_ICON_BYTES: &[u8] = include_bytes!("../assets/no-updates.png");
+const UPDATES_ICON_BYTES: &[u8] = include_bytes!("../assets/updates.png");
+const UPDATES_WARNING_LEVEL_ICON_BYTES: &[u8] = include_bytes!("../assets/updates-warn.png");
+const UPDATES_CRITICAL_LEVEL_ICON_BYTES: &[u8] = include_bytes!("../assets/updates-critical.png");
+const UPDATING_ICON_BYTES: &[u8] = include_bytes!("../assets/updating.png");
+
 enum Event {
-    Checking,
-    CheckUpdates,
+    Updates(u64),
+    Check,
+    Updating,
     Shutdown,
 }
 
@@ -86,25 +95,6 @@ impl Default for Config {
             inverval_in_seconds: 1200,
             warning_threshold: 25,
             critical_threshold: 100,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct Output {
-    class: String,
-    text: String,
-    alt: String,
-    tooltip: String,
-}
-
-impl Output {
-    fn new(class: &str, text: &str, alt: &str, tooltip: &str) -> Self {
-        Self {
-            class: class.to_string(),
-            text: text.to_string(),
-            alt: alt.to_string(),
-            tooltip: tooltip.to_string(),
         }
     }
 }
@@ -169,6 +159,10 @@ fn main() -> Result<()> {
         }
     });
 
+    let tray_icon_config = config.clone();
+    let tray_icon_tx = tx.clone();
+    setup_tray_icon(tray_icon_config, tray_icon_tx);
+
     let timer_config = config.clone();
     let timer_tx = tx.clone();
     thread::spawn(move || {
@@ -176,7 +170,7 @@ fn main() -> Result<()> {
             thread::sleep(std::time::Duration::from_secs(
                 timer_config.inverval_in_seconds,
             ));
-            timer_tx.send(Event::CheckUpdates).unwrap();
+            timer_tx.send(Event::Check).unwrap();
         }
     });
 
@@ -206,7 +200,7 @@ fn main() -> Result<()> {
                     | EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
                         info!("event: {:?}", event);
                         if debouncer.debounce() {
-                            watcher_tx.send(Event::Checking).unwrap();
+                            watcher_tx.send(Event::Updating).unwrap();
                         }
                     }
                     _ => {}
@@ -218,7 +212,7 @@ fn main() -> Result<()> {
         }
     });
 
-    tx.send(Event::CheckUpdates).unwrap();
+    tx.send(Event::Check).unwrap();
 
     loop {
         let event = match rx.recv() {
@@ -230,13 +224,7 @@ fn main() -> Result<()> {
         };
 
         match event {
-            Event::Checking => {
-                let output = Output::new("checking", "...", "...", "Checking for updates");
-                send_output(&output)?;
-                thread::sleep(Duration::from_secs(5));
-                tx.send(Event::CheckUpdates).unwrap();
-            }
-            Event::CheckUpdates => {
+            Event::Check => {
                 let updates: u64 = match check_updates()?.trim().parse() {
                     Ok(updates) => updates,
                     Err(e) => {
@@ -245,55 +233,16 @@ fn main() -> Result<()> {
                     }
                 };
 
-                if updates == 0 {
-                    let output = Output::new("", "0", "0", "No updates available");
-                    send_output(&output)?;
-                    continue;
-                }
-
-                if updates < config.warning_threshold {
-                    let output = Output::new(
-                        "",
-                        &updates.to_string(),
-                        &updates.to_string(),
-                        &format!("You have {} updates available", &updates.to_string()),
-                    );
-                    send_output(&output)?;
-                    continue;
-                }
-
-                if updates > config.warning_threshold && updates <= config.critical_threshold {
-                    let output = Output::new(
-                        "yellow",
-                        &updates.to_string(),
-                        &updates.to_string(),
-                        &format!("You have {} updates available", &updates.to_string()),
-                    );
-                    send_output(&output)?;
-                    continue;
-                }
-
-                let output = Output::new(
-                    "red",
-                    &updates.to_string(),
-                    &updates.to_string(),
-                    &format!("You have {} updates available", &updates.to_string()),
-                );
-                send_output(&output)?;
+                tx.send(Event::Updates(updates)).unwrap();
             }
+            Event::Updates(_) => {}
+            Event::Updating => {}
             Event::Shutdown => {
                 break;
             }
         }
     }
 
-    Ok(())
-}
-
-fn send_output(output: &Output) -> Result<()> {
-    let output_contents = serde_json::to_string(output)?;
-    info!("{}", output_contents);
-    println!("{}", output_contents);
     Ok(())
 }
 
@@ -362,4 +311,150 @@ fn setup_logging() {
     ]) {
         println!("Failed to initialize logging: {}", e);
     };
+}
+
+fn convert_bytes_to_icon(bytes: &[u8]) -> Result<Icon> {
+    let image_buff = match image::load_from_memory(bytes) {
+        Ok(image_dyn) => image_dyn.into_rgba8(),
+        Err(e) => return Err(e).context("Failed to load icon"),
+    };
+
+    let (width, height) = image_buff.dimensions();
+    let icon_rgba = image_buff.into_raw();
+
+    let icon = match Icon::from_rgba(icon_rgba, width, height) {
+        Ok(icon) => icon,
+        Err(e) => return Err(e).context("Failed to create icon"),
+    };
+
+    Ok(icon)
+}
+
+fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
+    let (tx, rx) = channel::<Event>();
+
+    std::thread::spawn(move || {
+        use tray_icon::{
+            TrayIconBuilder,
+            menu::{Menu, MenuItem},
+        };
+
+        gtk::init().unwrap();
+
+        let icon = match convert_bytes_to_icon(NO_UPDATES_ICON_BYTES) {
+            Ok(icon) => icon,
+            Err(e) => {
+                error!("Failed to convert bytes to icon: {}", e);
+                return;
+            }
+        };
+
+        let menu = Menu::new();
+
+        let num_of_updates = MenuItem::with_id("num_of_updates", "No Updates", false, None);
+
+        if let Err(e) = menu.append_items(&[&num_of_updates]) {
+            error!("Failed to append menu item: {}", e);
+            return;
+        }
+
+        let tray_icon = match TrayIconBuilder::new().with_menu(Box::new(menu)).build() {
+            Ok(tray_icon) => tray_icon,
+            Err(e) => {
+                error!("Failed to build tray icon: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = tray_icon.set_icon(Some(icon)) {
+            error!("Failed to set icon: {}", e);
+            return;
+        };
+
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    Event::Check => {
+                        let checking_icon = match convert_bytes_to_icon(CHECKING_ICON_BYTES) {
+                            Ok(icon) => icon,
+                            Err(e) => {
+                                error!("Failed to convert bytes to icon: {}", e);
+                                return glib::ControlFlow::Break;
+                            }
+                        };
+                        if let Err(e) = tray_icon.set_icon(Some(checking_icon)) {
+                            error!("Failed to set icon: {}", e);
+                            return glib::ControlFlow::Break;
+                        };
+                    }
+                    Event::Updates(updates) => {
+                        let updates_icon;
+                        if updates == 0 {
+                            updates_icon = match convert_bytes_to_icon(NO_UPDATES_ICON_BYTES) {
+                                Ok(icon) => icon,
+                                Err(e) => {
+                                    error!("Failed to convert bytes to icon: {}", e);
+                                    return glib::ControlFlow::Break;
+                                }
+                            };
+                        } else if updates <= config.warning_threshold {
+                            updates_icon = match convert_bytes_to_icon(UPDATES_ICON_BYTES) {
+                                Ok(icon) => icon,
+                                Err(e) => {
+                                    error!("Failed to convert bytes to icon: {}", e);
+                                    return glib::ControlFlow::Break;
+                                }
+                            };
+                        } else if updates <= config.critical_threshold {
+                            updates_icon =
+                                match convert_bytes_to_icon(UPDATES_WARNING_LEVEL_ICON_BYTES) {
+                                    Ok(icon) => icon,
+                                    Err(e) => {
+                                        error!("Failed to convert bytes to icon: {}", e);
+                                        return glib::ControlFlow::Break;
+                                    }
+                                };
+                        } else {
+                            updates_icon =
+                                match convert_bytes_to_icon(UPDATES_CRITICAL_LEVEL_ICON_BYTES) {
+                                    Ok(icon) => icon,
+                                    Err(e) => {
+                                        error!("Failed to convert bytes to icon: {}", e);
+                                        return glib::ControlFlow::Break;
+                                    }
+                                };
+                        }
+
+                        if let Err(e) = tray_icon.set_icon(Some(updates_icon)) {
+                            error!("Failed to set icon: {}", e);
+                            return glib::ControlFlow::Break;
+                        };
+
+                        num_of_updates.set_text(format!("{} pending updates", updates));
+                    }
+                    Event::Updating => {
+                        let updating_icon = match convert_bytes_to_icon(UPDATING_ICON_BYTES) {
+                            Ok(icon) => icon,
+                            Err(e) => {
+                                error!("Failed to convert bytes to icon: {}", e);
+                                return glib::ControlFlow::Break;
+                            }
+                        };
+                        if let Err(e) = tray_icon.set_icon(Some(updating_icon)) {
+                            error!("Failed to set icon: {}", e);
+                            return glib::ControlFlow::Break;
+                        };
+                    }
+                    Event::Shutdown => {
+                        return glib::ControlFlow::Break;
+                    }
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+
+        gtk::main();
+    });
+
+    tx
 }
