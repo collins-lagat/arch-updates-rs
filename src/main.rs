@@ -35,7 +35,7 @@ const UPDATING_ICON_BYTES: &[u8] = include_bytes!("../assets/updating.png");
 
 enum Event {
     Updates(u64),
-    Check,
+    Checking,
     Updating,
     Shutdown,
 }
@@ -171,7 +171,7 @@ fn main() -> Result<()> {
             thread::sleep(std::time::Duration::from_secs(
                 timer_config.inverval_in_seconds,
             ));
-            timer_tx.send(Event::Check).unwrap();
+            timer_tx.send(Event::Checking).unwrap();
         }
     });
 
@@ -215,7 +215,7 @@ fn main() -> Result<()> {
         }
     });
 
-    tx.send(Event::Check).unwrap();
+    tx.send(Event::Checking).unwrap();
 
     loop {
         let event = match rx.recv() {
@@ -227,8 +227,8 @@ fn main() -> Result<()> {
         };
 
         match event {
-            Event::Check => {
-                tray_icon_tx.send(Event::Check).unwrap();
+            Event::Checking => {
+                tray_icon_tx.send(Event::Checking).unwrap();
                 let updates: u64 = match check_updates()?.trim().parse() {
                     Ok(updates) => updates,
                     Err(e) => {
@@ -244,7 +244,7 @@ fn main() -> Result<()> {
             Event::Updates(_) => {}
             Event::Updating => {
                 thread::sleep(Duration::from_secs(5));
-                tx.send(Event::Check).unwrap();
+                tx.send(Event::Checking).unwrap();
             }
             Event::Shutdown => {
                 break;
@@ -383,7 +383,7 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
         glib::timeout_add_local(Duration::from_millis(100), move || {
             while let Ok(event) = rx.try_recv() {
                 match event {
-                    Event::Check => {
+                    Event::Checking => {
                         let checking_icon = match convert_bytes_to_icon(CHECKING_ICON_BYTES) {
                             Ok(icon) => icon,
                             Err(e) => {
