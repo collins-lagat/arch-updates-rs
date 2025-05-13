@@ -228,6 +228,7 @@ fn main() -> Result<()> {
 
         match event {
             Event::Check => {
+                tray_icon_tx.send(Event::Check).unwrap();
                 let updates: u64 = match check_updates()?.trim().parse() {
                     Ok(updates) => updates,
                     Err(e) => {
