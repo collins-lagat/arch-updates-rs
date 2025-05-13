@@ -167,6 +167,7 @@ fn main() -> Result<()> {
     let timer_tx = tx.clone();
     thread::spawn(move || {
         loop {
+            info!("Next check in {} seconds", timer_config.inverval_in_seconds);
             thread::sleep(std::time::Duration::from_secs(
                 timer_config.inverval_in_seconds,
             ));
@@ -189,6 +190,8 @@ fn main() -> Result<()> {
             error!("Failed to watch directory: {}", e);
             return;
         }
+
+        info!("Watching for updates in {:?}", PACMAN_DIR);
 
         let mut debouncer = Debouncer::new(Duration::from_millis(1000));
 
@@ -232,6 +235,8 @@ fn main() -> Result<()> {
                         break;
                     }
                 };
+
+                info!("{} Updates available!", updates);
 
                 tx.send(Event::Updates(updates)).unwrap();
             }
@@ -431,6 +436,8 @@ fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
                         };
 
                         num_of_updates.set_text(format!("{} pending updates", updates));
+
+                        info!("Updated tray icon");
                     }
                     Event::Updating => {
                         let updating_icon = match convert_bytes_to_icon(UPDATING_ICON_BYTES) {
