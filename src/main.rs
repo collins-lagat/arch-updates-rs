@@ -402,7 +402,7 @@ fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
                                     return glib::ControlFlow::Break;
                                 }
                             };
-                        } else if updates <= config.warning_threshold {
+                        } else if updates < config.warning_threshold {
                             updates_icon = match convert_bytes_to_icon(UPDATES_ICON_BYTES) {
                                 Ok(icon) => icon,
                                 Err(e) => {
@@ -410,7 +410,7 @@ fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
                                     return glib::ControlFlow::Break;
                                 }
                             };
-                        } else if updates <= config.critical_threshold {
+                        } else if updates < config.critical_threshold {
                             updates_icon =
                                 match convert_bytes_to_icon(UPDATES_WARNING_LEVEL_ICON_BYTES) {
                                     Ok(icon) => icon,
