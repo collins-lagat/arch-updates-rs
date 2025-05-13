@@ -175,7 +175,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let watcher_tx = tx.clone();
+    let watcher_gtk_tx = tray_icon_tx.clone();
     thread::spawn(move || {
         let (tx, rx) = channel::<NotifyResult<NotifyEvent>>();
         let mut watcher = match notify::recommended_watcher(tx) {
@@ -203,7 +203,7 @@ fn main() -> Result<()> {
                     | EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
                         info!("event: {:?}", event);
                         if debouncer.debounce() {
-                            watcher_tx.send(Event::Updating).unwrap();
+                            watcher_gtk_tx.send(Event::Updating).unwrap();
                         }
                     }
                     _ => {}
@@ -241,7 +241,10 @@ fn main() -> Result<()> {
                 tray_icon_tx.send(Event::Updates(updates)).unwrap();
             }
             Event::Updates(_) => {}
-            Event::Updating => {}
+            Event::Updating => {
+                thread::sleep(Duration::from_secs(5));
+                tx.send(Event::Check).unwrap();
+            }
             Event::Shutdown => {
                 break;
             }
@@ -335,7 +338,7 @@ fn convert_bytes_to_icon(bytes: &[u8]) -> Result<Icon> {
     Ok(icon)
 }
 
-fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
+fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
     let (tx, rx) = channel::<Event>();
 
     std::thread::spawn(move || {
@@ -451,6 +454,7 @@ fn setup_tray_icon(config: Config, _app_tx: Sender<Event>) -> Sender<Event> {
                             error!("Failed to set icon: {}", e);
                             return glib::ControlFlow::Break;
                         };
+                        app_tx.send(Event::Updating).unwrap();
                     }
                     Event::Shutdown => {
                         return glib::ControlFlow::Break;
