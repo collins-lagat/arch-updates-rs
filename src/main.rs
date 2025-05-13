@@ -160,8 +160,8 @@ fn main() -> Result<()> {
     });
 
     let tray_icon_config = config.clone();
-    let tray_icon_tx = tx.clone();
-    setup_tray_icon(tray_icon_config, tray_icon_tx);
+    let _tx = tx.clone();
+    let tray_icon_tx = setup_tray_icon(tray_icon_config, _tx);
 
     let timer_config = config.clone();
     let timer_tx = tx.clone();
@@ -238,7 +238,7 @@ fn main() -> Result<()> {
 
                 info!("{} Updates available!", updates);
 
-                tx.send(Event::Updates(updates)).unwrap();
+                tray_icon_tx.send(Event::Updates(updates)).unwrap();
             }
             Event::Updates(_) => {}
             Event::Updating => {}
