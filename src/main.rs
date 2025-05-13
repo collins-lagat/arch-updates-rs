@@ -19,7 +19,9 @@ use signal_hook::{
     consts::{SIGINT, SIGTERM},
     iterator::Signals,
 };
-use simplelog::{Config as LogConfig, WriteLogger};
+use simplelog::{
+    ColorChoice, CombinedLogger, Config as LogConfig, TermLogger, TerminalMode, WriteLogger,
+};
 
 const PACMAN_DIR: &str = "/var/lib/pacman/local";
 
@@ -348,7 +350,16 @@ fn setup_logging() {
             return;
         }
     };
-    if let Err(e) = WriteLogger::init(LevelFilter::Info, LogConfig::default(), log_file) {
+
+    if let Err(e) = CombinedLogger::init(vec![
+        TermLogger::new(
+            LevelFilter::Info,
+            LogConfig::default(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        ),
+        WriteLogger::new(LevelFilter::Info, LogConfig::default(), log_file),
+    ]) {
         println!("Failed to initialize logging: {}", e);
     };
 }
