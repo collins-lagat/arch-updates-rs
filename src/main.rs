@@ -449,7 +449,14 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
                             return glib::ControlFlow::Break;
                         };
 
-                        list_of_updates_submenu.items().clear();
+                        for item in list_of_updates_submenu.items() {
+                            if let Some(_item) = item.as_menuitem() {
+                                if let Err(e) = list_of_updates_submenu.remove(_item) {
+                                    error!("Failed to remove menu item: {}", e);
+                                    return glib::ControlFlow::Break;
+                                };
+                            }
+                        }
 
                         list_of_updates_submenu
                             .set_text(format!("{} pending updates", num_of_updates));
