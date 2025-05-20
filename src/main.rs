@@ -1,7 +1,8 @@
 use std::{
     fs::File,
+    io::{BufRead, BufReader},
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
     sync::mpsc::{Sender, channel},
     thread,
     time::{Duration, Instant},
@@ -34,7 +35,7 @@ const UPDATES_CRITICAL_LEVEL_ICON_BYTES: &[u8] = include_bytes!("../assets/updat
 const UPDATING_ICON_BYTES: &[u8] = include_bytes!("../assets/updating.png");
 
 enum Event {
-    Updates(u64),
+    Updates(Vec<String>),
     Checking,
     Updating,
     Shutdown,
@@ -42,9 +43,9 @@ enum Event {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct Config {
-    inverval_in_seconds: u64,
-    warning_threshold: u64,
-    critical_threshold: u64,
+    inverval_in_seconds: u32,
+    warning_threshold: u32,
+    critical_threshold: u32,
 }
 
 impl Config {
@@ -169,7 +170,7 @@ fn main() -> Result<()> {
         loop {
             info!("Next check in {} seconds", timer_config.inverval_in_seconds);
             thread::sleep(std::time::Duration::from_secs(
-                timer_config.inverval_in_seconds,
+                timer_config.inverval_in_seconds as u64,
             ));
             timer_tx.send(Event::Checking).unwrap();
         }
@@ -229,17 +230,20 @@ fn main() -> Result<()> {
         match event {
             Event::Checking => {
                 tray_icon_tx.send(Event::Checking).unwrap();
-                let updates: u64 = match check_updates()?.trim().parse() {
-                    Ok(updates) => updates,
+
+                let list_of_updates = match check_updates() {
+                    Ok(list_of_updates) => list_of_updates,
                     Err(e) => {
-                        error!("Failed to parse output of checkupdates: {}", e);
+                        error!("Failed to check for updates: {}", e);
                         break;
                     }
                 };
 
-                info!("{} Updates available!", updates);
+                let num_of_updates = list_of_updates.len();
 
-                tray_icon_tx.send(Event::Updates(updates)).unwrap();
+                info!("{} Updates available!", num_of_updates);
+
+                tray_icon_tx.send(Event::Updates(list_of_updates)).unwrap();
             }
             Event::Updates(_) => {}
             Event::Updating => {
@@ -255,27 +259,32 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn check_updates() -> Result<String> {
-    match Command::new("sh")
-        .arg("-c")
-        .arg("checkupdates | wc -l")
-        .output()
-    {
-        Ok(output) => {
-            if !output.status.success() {
-                bail!("checkupdates failed");
-            };
+fn check_updates() -> Result<Vec<String>> {
+    let mut child = match Command::new("checkupdates").stdout(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => bail!("Failed to check for updates: {}", e),
+    };
 
-            let stdout = match String::from_utf8(output.stdout) {
-                Ok(stdout) => stdout,
+    let mut updates = Vec::<String>::new();
+
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(line) => line,
                 Err(e) => {
-                    bail!("Failed to parse stdout of checkupdates: {}", e);
+                    bail!("Failed to read line from checkupdates: {}", e);
                 }
             };
-            Ok(stdout)
+
+            let content = String::from_utf8(line.into_bytes())?;
+            updates.push(content);
         }
-        Err(e) => bail!("Failed to check for updates: {}", e),
     }
+
+    child.wait()?;
+
+    Ok(updates)
 }
 
 fn verify_checkupdates_is_installed() -> Result<()> {
@@ -345,7 +354,7 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
     std::thread::spawn(move || {
         use tray_icon::{
             TrayIconBuilder,
-            menu::{Menu, MenuItem},
+            menu::{Menu, MenuItem, Submenu},
         };
 
         gtk::init().unwrap();
@@ -360,9 +369,9 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
 
         let menu = Menu::new();
 
-        let num_of_updates = MenuItem::with_id("num_of_updates", "No Updates", false, None);
+        let list_of_updates_submenu = Submenu::new("0 pending updates", true);
 
-        if let Err(e) = menu.append_items(&[&num_of_updates]) {
+        if let Err(e) = menu.append_items(&[&list_of_updates_submenu]) {
             error!("Failed to append menu item: {}", e);
             return;
         }
@@ -396,9 +405,10 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
                             return glib::ControlFlow::Break;
                         };
                     }
-                    Event::Updates(updates) => {
+                    Event::Updates(list_of_updates) => {
                         let updates_icon;
-                        if updates == 0 {
+                        let num_of_updates = list_of_updates.len() as u32;
+                        if num_of_updates == 0 {
                             updates_icon = match convert_bytes_to_icon(NO_UPDATES_ICON_BYTES) {
                                 Ok(icon) => icon,
                                 Err(e) => {
@@ -406,7 +416,7 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
                                     return glib::ControlFlow::Break;
                                 }
                             };
-                        } else if updates < config.warning_threshold {
+                        } else if num_of_updates < config.warning_threshold {
                             updates_icon = match convert_bytes_to_icon(UPDATES_ICON_BYTES) {
                                 Ok(icon) => icon,
                                 Err(e) => {
@@ -414,7 +424,7 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
                                     return glib::ControlFlow::Break;
                                 }
                             };
-                        } else if updates < config.critical_threshold {
+                        } else if num_of_updates < config.critical_threshold {
                             updates_icon =
                                 match convert_bytes_to_icon(UPDATES_WARNING_LEVEL_ICON_BYTES) {
                                     Ok(icon) => icon,
@@ -439,7 +449,18 @@ fn setup_tray_icon(config: Config, app_tx: Sender<Event>) -> Sender<Event> {
                             return glib::ControlFlow::Break;
                         };
 
-                        num_of_updates.set_text(format!("{} pending updates", updates));
+                        list_of_updates_submenu.items().clear();
+
+                        list_of_updates_submenu
+                            .set_text(format!("{} pending updates", num_of_updates));
+
+                        for update in list_of_updates.iter() {
+                            let update_item = MenuItem::new(update, true, None);
+                            if let Err(e) = list_of_updates_submenu.append_items(&[&update_item]) {
+                                error!("Failed to append menu items: {}", e);
+                                return glib::ControlFlow::Break;
+                            }
+                        }
 
                         info!("Updated tray icon");
                     }
