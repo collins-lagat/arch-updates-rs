@@ -34,3 +34,7 @@ critical_threshold = 100
 ```
 
 The `inverval_in_seconds` option sets the interval in seconds between each check for updates.
+
+## Acknowledgements
+
+This project was inspired by [arch-update](https://github.com/RaphaelRochet/arch-update), which is a GNOME Shell extension that shows the available updates for Arch Linux. I wanted to have as similar experience as the GNOME Shell extension, but in whatever DE I wanted.
